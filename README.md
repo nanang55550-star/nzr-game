@@ -9,11 +9,11 @@ git clone https://github.com/nanang55550-star/nzr-game.git
 ```bash
 cd nzr-game
 ```
-❗ kalau mau update Repository github karena ada game baru dengan ❗
+❗ catatan: kalau mau update Repository github karena ada game baru gunakan perintah ini ❗
 ```bash
 git pull origin main
 ```
-### cara pakai 
+## cara pakai 
 apa game yang ingin anda mainkan lihat dengan perintah ls
 ```bash
 ls
@@ -22,7 +22,11 @@ lalu masuk ke folder yang game yang anda mau ingin kan
 ```bash
 cd [nama folder game]
 ```
-jalan skrip dengan;
+contoh:
+```bash
+cd tetris
+```
+jalan skrip dengan:
 ```bash
 python server.py
 ```
