@@ -31,4 +31,4 @@ jalan skrip dengan:
 python server.py
 ```
 
-# by NZR 
+ ---  **by NZR ⭐** 
