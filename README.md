@@ -9,6 +9,10 @@ git clone https://github.com/nanang55550-star/nzr-game.git
 ```bash
 cd nzr-game
 ```
+❗ kalau mau update Repository github karena ada game baru dengan ❗
+```bash
+git pull origin main
+```
 ## cara pakai 
 apa game yang ingin anda mainkan lihat dengan perintah ls
 ```bash
@@ -22,3 +26,4 @@ jalan skrip dengan;
 ```bash
 python server.py
 ```
+
