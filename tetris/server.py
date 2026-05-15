@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tetris Dark Mode - Local Server
+Local Server
 Cara pakai: python3 server.py
 """
 import http.server
@@ -17,7 +17,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 os.chdir(DIRECTORY)
 
 print("=" * 45)
-print("🎮  TETRIS DARK MODE SERVER")
+print(" Game Running")
 print("=" * 45)
 print(f"📁  Folder : {DIRECTORY}")
 print(f"🌐  Port   : {PORT}")
