@@ -3,4 +3,22 @@ Berisi game sederhana yang dapat di jalankan secara offline cocok untuk ketika g
 
 ## instalasi
 ```bash
-git clone 
+git clone https://github.com/nanang55550-star/nzr-game.git
+```
+# masuk ke folder 
+```bash
+cd nzr-game
+```
+## cara pakai 
+apa game yang ingin anda mainkan lihat dengan perintah ls
+```bash
+ls
+```
+lalu masuk ke folder yang game yang anda mau ingin kan
+```bash
+cd [nama folder game]
+```
+jalan skrip dengan;
+```bash
+python server.py
+```
