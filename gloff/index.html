@@ -273,7 +273,7 @@ class Terrain {
     this.generate();
     this.generateClouds();
   }
-  generate() {
+    generate() {
     const layers = [
       { amp: this.rng.range(50,90),  freq: this.rng.range(0.004,0.009), phase: this.rng.range(0,Math.PI*2), type:'sin' },
       { amp: this.rng.range(25,50),  freq: this.rng.range(0.008,0.018), phase: this.rng.range(0,Math.PI*2), type:'cos' },
@@ -281,15 +281,31 @@ class Terrain {
       { amp: this.rng.range(6,16),   freq: this.rng.range(0.03,0.07),   phase: this.rng.range(0,Math.PI*2), type:'cos' },
     ];
     const base = H - 90;
+
+    // 1. Hitung dulu tinggi Y untuk titik batas datar di x = 130
+    let flatY = base;
+    for (let l of layers) {
+      flatY += l.amp * (l.type === 'sin' ? Math.sin(l.freq * 130 + l.phase) : Math.cos(l.freq * 130 + l.phase));
+    }
+    flatY = Math.max(60, Math.min(H - 30, flatY));
+
+    // 2. Loop untuk me-render seluruh panjang map
     for (let x = 0; x <= W; x += 2) {
       let y = base;
       for (let l of layers) {
-        y += l.amp * (l.type === 'sin' ? Math.sin(l.freq*x+l.phase) : Math.cos(l.freq*x+l.phase));
+        y += l.amp * (l.type === 'sin' ? Math.sin(l.freq * x + l.phase) : Math.cos(l.freq * x + l.phase));
       }
-      this.points.push({ x, y: Math.max(60, Math.min(H-30, y)) });
+      let finalY = Math.max(60, Math.min(H - 30, y));
+
+      // 3. JIKA koordinat x berada di area awal (0-130), paksa nilainya menjadi flatY
+      if (x <= 130) {
+        finalY = flatY;
+      }
+
+      this.points.push({ x, y: finalY });
     }
   }
-  generateClouds() {
+generateClouds() {
     for (let i = 0; i < 6; i++) {
       this.clouds.push({
         x: this.rng.range(0, W), y: this.rng.range(20, H*0.35),
