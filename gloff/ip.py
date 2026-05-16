@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 """
-ip.py - Helper Script untuk Mini Golf Multiplayer
+ip.py - Helper Script untuk Game Multiplayer (Universal)
 Fungsi:
-1. Auto-detect IP Hotspot (ap0) dan WiFi (wlan0)
-2. Serve index.html via HTTP server
-3. Tampilkan info koneksi untuk pemain
+1. Auto-detect IP Hotspot (ap0) dan WiFi (wlan0) via global ifconfig sifting
+2. Serve index.html via HTTP server di port 8000
+3. Tampilkan info koneksi lengkap untuk para pemain
 
 Cara pakai:
   python ip.py
-
-Output akan menunjukkan:
-- IP Hotspot Anda (untuk teman connect)
-- IP Localhost (untuk Anda main sendiri)
-- URL yang harus dibuka di browser
 """
 
 import socket
@@ -25,35 +20,37 @@ import time
 
 HTTP_PORT = 8000
 
-def get_ip_from_interface(interface):
-    """Ambil IP dari interface network tertentu"""
+def get_ip_from_ifconfig_global():
+    """Mengambil semua data ifconfig sekaligus untuk menghindari masalah izin Android"""
     try:
-        result = subprocess.run(['ifconfig', interface], 
-                              capture_output=True, text=True, timeout=5)
-        output = result.stdout
-        # Cari pattern inet xxx.xxx.xxx.xxx
-        match = re.search(r'inet\s+(\d+\.\d+\.\d+\.\d+)', output)
-        if match:
-            return match.group(1)
+        # Jalankan ifconfig secara global untuk memotong batasan permission interface spesifik
+        result = subprocess.run(['ifconfig'], capture_output=True, text=True, timeout=5)
+        return result.stdout
     except Exception:
-        pass
-    return None
+        return ""
 
 def get_all_ips():
-    """Deteksi semua IP yang tersedia"""
+    """Deteksi semua IP yang tersedia dengan menyaring output global"""
+    raw_output = get_ip_from_ifconfig_global()
+    
     ips = {
         'hotspot': None,    # ap0
         'wifi': None,       # wlan0
         'localhost': '127.0.0.1'
     }
 
-    # Coba deteksi ap0 (hotspot)
-    ips['hotspot'] = get_ip_from_interface('ap0')
+    # Gunakan Regex DOTALL untuk mengekstrak ip dari blok interface yang tepat
+    # Saring IP Hotspot (ap0)
+    ap0_match = re.search(r'ap0:.*?\n\s+inet\s+(\d+\.\d+\.\d+\.\d+)', raw_output, re.DOTALL)
+    if ap0_match:
+        ips['hotspot'] = ap0_match.group(1)
+        
+    # Saring IP WiFi (wlan0)
+    wlan0_match = re.search(r'wlan0:.*?\n\s+inet\s+(\d+\.\d+\.\d+\.\d+)', raw_output, re.DOTALL)
+    if wlan0_match:
+        ips['wifi'] = wlan0_match.group(1)
 
-    # Coba deteksi wlan0 (wifi)
-    ips['wifi'] = get_ip_from_interface('wlan0')
-
-    # Fallback: coba hostname
+    # Fallback: jika metode sifting di atas kosong, coba gunakan hostname
     try:
         hostname = socket.gethostname()
         ips['hostname_ip'] = socket.getaddrinfo(hostname, None, socket.AF_INET)[0][4][0]
@@ -65,7 +62,7 @@ def get_all_ips():
 def print_banner(ips):
     """Tampilkan info koneksi yang rapi"""
     print("=" * 55)
-    print("  🎮 PROCEDURAL MINI GOLF - IP DETECTOR & HTTP SERVER")
+    print("  🎮 MULTIPLAYER GAME - IP DETECTOR & HTTP SERVER")
     print("=" * 55)
     print()
     print("  📡 INFORMASI KONEKSI:")
@@ -76,7 +73,7 @@ def print_banner(ips):
         print(f"     → Teman connect ke:  ws://{ips['hotspot']}:8765")
         print()
     else:
-        print("  ❌ Hotspot tidak aktif (ap0 tidak ditemukan)")
+        print("  ❌ Hotspot tidak aktif / tidak terdeteksi")
         print()
 
     if ips['wifi']:
@@ -142,7 +139,7 @@ def start_http_server():
         httpd.shutdown()
 
 def main():
-    print("🔍 Mendeteksi IP network...\n")
+    print("🔍 Mendeteksi IP network secara aman...\n")
 
     ips = get_all_ips()
     print_banner(ips)
