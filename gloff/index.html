@@ -422,9 +422,25 @@ class Player {
       this.vy *= GROUND_DRAG;
     }
 
+        // ── GANTI BARIS 425 SAMPAI 427 DENGAN INI ──
     this.isStopped = Math.abs(this.vx) < STOP_THRESH && Math.abs(this.vy) < STOP_THRESH;
-    if (this.isStopped) { this.vx=0; this.vy=0; }
+
+    if (!this.isStopped) {
+      this.stuckTimer++; // Hitung frame selama bola bergerak fana
+      
+      // Jika bola kena bug "Infinity" lebih dari 5 detik (300 frame)
+      if (this.stuckTimer >= 300) { 
+        this.isStopped = true; // Paksa berhenti seketika di tempat!
+        this.stuckTimer = 0;   // Reset timer
+      }
+    } else {
+      this.stuckTimer = 0; // Reset ke 0 kalau bola memang berhenti normal
+      this.vx = 0; 
+      this.vy = 0; 
+    }
+
     return true;
+
   }
 
   draw(ctx) {
