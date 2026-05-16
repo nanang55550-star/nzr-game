@@ -105,10 +105,7 @@
     opacity:0; pointer-events:none;
     transition:opacity 0.25s ease;
   }
-  #analogContainer.show {
-    opacity:1;
-    pointer-events:auto;
-  }
+  #analogContainer.show { opacity:1; pointer-events:auto; }
   #analogBase {
     position:absolute; inset:0; border-radius:50%;
     background:rgba(255,255,255,0.08); border:2px solid rgba(255,255,255,0.15);
@@ -140,6 +137,19 @@
   #waitingText div:first-child { font-size:22px; font-weight:700; color:#fff; opacity:0.85; }
   #waitingText div:last-child { font-size:13px; color:#888; margin-top:6px; }
   @keyframes pulse { 0%,100%{opacity:0.6;} 50%{opacity:1;} }
+
+  /* ── OOB Notification ── */
+  #oobNotify {
+    position:absolute; top:60px; left:50%; transform:translateX(-50%);
+    z-index:20; pointer-events:none;
+    background:rgba(198,40,40,0.92); color:#fff;
+    padding:8px 20px; border-radius:24px;
+    font-size:14px; font-weight:700;
+    opacity:0; transition:opacity 0.3s;
+    white-space:nowrap;
+    box-shadow:0 4px 16px rgba(0,0,0,0.5);
+  }
+  #oobNotify.show { opacity:1; }
 
   #ipPanel { z-index:35; }
   .ipHint { font-size:11px; color:#888; margin-bottom:14px; text-align:center; }
@@ -178,6 +188,9 @@
     <div id="analogStick"></div>
   </div>
 
+  <!-- OOB Notification Banner -->
+  <div id="oobNotify">⚠️ Out of Bounds! +1 Penalti</div>
+
   <div id="winNotify">
     <div id="winNotifyText"></div>
     <div id="winNotifySub">Map baru akan dimuat...</div>
@@ -215,15 +228,12 @@
 
 <script>
 // ============================================================
-//  KONFIGURASI SERVER
+//  KONFIGURASI
 // ============================================================
 let SERVER_URL = 'ws://192.168.43.1:8765';
 
-// ============================================================
-//  FISIKA
-// ============================================================
 const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
+const ctx    = canvas.getContext('2d');
 const W = 800, H = 450;
 
 const GRAVITY     = 0.22;
@@ -235,6 +245,10 @@ const MAX_POWER   = 16;
 const HOLE_R      = 14;
 const BALL_R      = 8;
 const ANALOG_MAX  = 35;
+
+// ─── OOB: margin dalam piksel sebelum dianggap out-of-bounds ───
+// Dibuat sedikit lebih besar dari radius agar tidak stuck di tepian
+const OOB_MARGIN = BALL_R + 2;
 
 // ============================================================
 //  SEEDED RANDOM
@@ -255,124 +269,171 @@ class Terrain {
   constructor(seed) {
     this.rng = new SeededRandom(seed);
     this.points = [];
-    this.clouds = [];
+    this.clouds  = [];
     this.generate();
     this.generateClouds();
   }
   generate() {
     const layers = [
-      { amp: this.rng.range(50,90),  freq: this.rng.range(0.004,0.009),  phase: this.rng.range(0, Math.PI*2), type:'sin' },
-      { amp: this.rng.range(25,50),  freq: this.rng.range(0.008,0.018),  phase: this.rng.range(0, Math.PI*2), type:'cos' },
-      { amp: this.rng.range(12,28),  freq: this.rng.range(0.015,0.035),  phase: this.rng.range(0, Math.PI*2), type:'sin' },
-      { amp: this.rng.range(6,16),   freq: this.rng.range(0.03,0.07),    phase: this.rng.range(0, Math.PI*2), type:'cos' }
+      { amp: this.rng.range(50,90),  freq: this.rng.range(0.004,0.009), phase: this.rng.range(0,Math.PI*2), type:'sin' },
+      { amp: this.rng.range(25,50),  freq: this.rng.range(0.008,0.018), phase: this.rng.range(0,Math.PI*2), type:'cos' },
+      { amp: this.rng.range(12,28),  freq: this.rng.range(0.015,0.035), phase: this.rng.range(0,Math.PI*2), type:'sin' },
+      { amp: this.rng.range(6,16),   freq: this.rng.range(0.03,0.07),   phase: this.rng.range(0,Math.PI*2), type:'cos' },
     ];
     const base = H - 90;
     for (let x = 0; x <= W; x += 2) {
       let y = base;
       for (let l of layers) {
-        const wave = l.type === 'sin' ? Math.sin(l.freq * x + l.phase) : Math.cos(l.freq * x + l.phase);
-        y += l.amp * wave;
+        y += l.amp * (l.type === 'sin' ? Math.sin(l.freq*x+l.phase) : Math.cos(l.freq*x+l.phase));
       }
-      y = Math.max(60, Math.min(H - 30, y));
-      this.points.push({ x, y });
+      this.points.push({ x, y: Math.max(60, Math.min(H-30, y)) });
     }
   }
   generateClouds() {
     for (let i = 0; i < 6; i++) {
       this.clouds.push({
-        x: this.rng.range(0, W),
-        y: this.rng.range(20, H * 0.35),
-        w: this.rng.range(60, 120),
-        h: this.rng.range(20, 35),
-        speed: this.rng.range(0.15, 0.4)
+        x: this.rng.range(0, W), y: this.rng.range(20, H*0.35),
+        w: this.rng.range(60,120), h: this.rng.range(20,35),
+        speed: this.rng.range(0.15,0.4),
       });
     }
   }
   getY(x) {
     if (x <= 0) return this.points[0].y;
     if (x >= W) return this.points[this.points.length-1].y;
-    const idx = Math.floor(x / 2);
-    const p1 = this.points[idx];
-    const p2 = this.points[idx+1] || p1;
+    const idx = Math.floor(x/2);
+    const p1  = this.points[idx];
+    const p2  = this.points[idx+1] || p1;
     return p1.y + (p2.y - p1.y) * ((x - p1.x) / 2);
   }
   getNormal(x) {
-    const d = 5;
-    const y1 = this.getY(x - d), y2 = this.getY(x + d);
-    const dy = y2 - y1;
-    const len = Math.sqrt((d*2)**2 + dy**2);
-    if (len === 0) return { x:0, y:-1 };
-    return { x: -dy/len, y: (d*2)/len };
+    const d=5, y1=this.getY(x-d), y2=this.getY(x+d);
+    const dy=y2-y1, len=Math.sqrt((d*2)**2+dy**2);
+    if (len===0) return {x:0,y:-1};
+    return { x:-dy/len, y:(d*2)/len };
   }
 }
 
 // ============================================================
 //  PLAYER
+//  MODIFIKASI: tambah lastSafeX, lastSafeY, isOOB
 // ============================================================
 class Player {
   constructor(data) {
-    this.id = data.id;
-    this.name = data.name;
-    this.color = data.color;
+    this.id          = data.id;
+    this.name        = data.name;
+    this.color       = data.color;
     this.strokeColor = data.strokeColor || data.color;
-    this.wins = data.wins || 0;
-    this.strokes = data.strokes || 0;
-    this.totalStrokes = data.totalStrokes || 0;
-    this.x = data.x || 80;
-    this.y = data.y || 0;
-    this.vx = data.vx || 0;
-    this.vy = data.vy || 0;
-    this.radius = BALL_R;
-    this.inHole = data.inHole || false;
-    this.isStopped = data.isStopped !== undefined ? data.isStopped : true;
+    this.wins        = data.wins        || 0;
+    this.strokes     = data.strokes     || 0;
+    this.totalStrokes= data.totalStrokes|| 0;
+    this.x           = data.x           || 80;
+    this.y           = data.y           || 0;
+    this.vx          = data.vx          || 0;
+    this.vy          = data.vy          || 0;
+    this.radius      = BALL_R;
+    this.inHole      = data.inHole      || false;
+    this.isStopped   = data.isStopped !== undefined ? data.isStopped : true;
+
+    // ── OOB state ──────────────────────────────────────────
+    // Posisi aman: diperbarui SEBELUM setiap tembakan
+    this.lastSafeX   = this.x;
+    this.lastSafeY   = this.y;
+    // Flag: true selama frame OOB (cegah multi-trigger)
+    this.isOOB       = false;
   }
 
+  /**
+   * Simpan posisi saat ini sebagai posisi aman.
+   * Dipanggil oleh Game SEBELUM pemain menembak.
+   */
+  saveSafePosition() {
+    this.lastSafeX = this.x;
+    this.lastSafeY = this.y;
+    this.isOOB     = false;
+  }
+
+  /**
+   * Kembalikan bola ke posisi aman dan hentikan total.
+   * Dipanggil saat OOB terdeteksi.
+   */
+  resetToSafe(terrain) {
+    this.x  = this.lastSafeX;
+    // Snap Y ke permukaan terrain agar tidak melayang
+    this.y  = terrain ? terrain.getY(this.lastSafeX) - this.radius : this.lastSafeY;
+    this.vx = 0;
+    this.vy = 0;
+    this.isStopped = true;
+    this.isOOB     = true;   // tandai sudah diproses, cegah trigger ulang
+  }
+
+  /**
+   * Update fisika per frame.
+   * MODIFIKASI: Hapus clamp X dan bounce dinding — diganti return false
+   * agar Game bisa mendeteksi OOB sebelum koordinat rusak.
+   *
+   * @param {Terrain} terrain
+   * @returns {boolean} false jika bola keluar batas (OOB)
+   */
   update(terrain) {
-    if (this.inHole) return;
+    if (this.inHole) return true;
+
     this.vy += GRAVITY;
     this.vx *= AIR_DRAG;
     this.vy *= AIR_DRAG;
-    this.x += this.vx;
-    this.y += this.vy;
+    this.x  += this.vx;
+    this.y  += this.vy;
 
-    if (this.x < this.radius) { this.x = this.radius; this.vx *= -0.5; }
-    if (this.x > W - this.radius) { this.x = W - this.radius; this.vx *= -0.5; }
+    // ── OOB DETECTION ──────────────────────────────────────
+    // Periksa SEBELUM kita clamp agar posisi asli terdeteksi
+    if (this.x < OOB_MARGIN || this.x > W - OOB_MARGIN) {
+      // Kembalikan nilai false → Game akan handle penalti
+      return false;
+    }
 
+    // Kemiringan tanah & pantulan
     const groundY = terrain.getY(this.x);
     if (this.y + this.radius > groundY) {
       this.y = groundY - this.radius;
-      const normal = terrain.getNormal(this.x);
-      const vDotN = this.vx * normal.x + this.vy * normal.y;
+      const normal   = terrain.getNormal(this.x);
+      const vDotN    = this.vx*normal.x + this.vy*normal.y;
       if (vDotN > 0) {
-        this.vx -= (1 + BOUNCE) * vDotN * normal.x;
-        this.vy -= (1 + BOUNCE) * vDotN * normal.y;
+        this.vx -= (1+BOUNCE)*vDotN*normal.x;
+        this.vy -= (1+BOUNCE)*vDotN*normal.y;
       }
       this.vx *= GROUND_DRAG;
       this.vy *= GROUND_DRAG;
     }
+
     this.isStopped = Math.abs(this.vx) < STOP_THRESH && Math.abs(this.vy) < STOP_THRESH;
-    if (this.isStopped) { this.vx = 0; this.vy = 0; }
+    if (this.isStopped) { this.vx=0; this.vy=0; }
+    return true;
   }
 
   draw(ctx) {
     if (this.inHole) return;
-    ctx.beginPath();
-    ctx.ellipse(this.x, this.y + this.radius + 1, this.radius, this.radius*0.4, 0, 0, Math.PI*2);
-    ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fill();
 
+    // Bayangan bola
+    ctx.beginPath();
+    ctx.ellipse(this.x, this.y+this.radius+1, this.radius, this.radius*0.4, 0, 0, Math.PI*2);
+    ctx.fillStyle='rgba(0,0,0,0.25)'; ctx.fill();
+
+    // Bola utama
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
-    ctx.fillStyle = this.color; ctx.fill();
-    ctx.strokeStyle = this.strokeColor; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.fillStyle=this.color; ctx.fill();
+    ctx.strokeStyle=this.strokeColor; ctx.lineWidth=2.5; ctx.stroke();
 
+    // Highlight spekuler
     ctx.beginPath();
-    ctx.arc(this.x - 2.5, this.y - 2.5, this.radius*0.35, 0, Math.PI*2);
-    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fill();
+    ctx.arc(this.x-2.5, this.y-2.5, this.radius*0.35, 0, Math.PI*2);
+    ctx.fillStyle='rgba(255,255,255,0.35)'; ctx.fill();
 
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 10px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(this.name, this.x, this.y - this.radius - 6);
+    // Label nama
+    ctx.fillStyle='#fff';
+    ctx.font='bold 10px sans-serif';
+    ctx.textAlign='center';
+    ctx.fillText(this.name, this.x, this.y-this.radius-6);
   }
 }
 
@@ -381,25 +442,28 @@ class Player {
 // ============================================================
 class Game {
   constructor() {
-    this.ws = null;
-    this.connected = false;
+    this.ws                = null;
+    this.connected         = false;
     this.reconnectAttempts = 0;
-    this.myId = null;
-    this.players = [];
-    this.terrain = null;
-    this.hole = null;
-    this.holeNumber = 1;
-    this.currentTurnId = null;
-    this.gameOver = false;
-    this.waitingForStop = false;
+    this.myId              = null;
+    this.players           = [];
+    this.terrain           = null;
+    this.hole              = null;
+    this.holeNumber        = 1;
+    this.currentTurnId     = null;
+    this.gameOver          = false;
+    this.waitingForStop    = false;
     this.localPlayerJoined = false;
 
     this.analogDragging = false;
-    this.analogCenter = { x:0, y:0 };
-    this.analogPower = 0;
-    this.analogDir = { x:0, y:0 };
+    this.analogCenter   = {x:0,y:0};
+    this.analogPower    = 0;
+    this.analogDir      = {x:0,y:0};
 
     this.leaderboardData = [];
+
+    // ── OOB timer untuk notifikasi banner ──
+    this._oobTimer = null;
 
     this.setupUI();
     this.setupAnalog();
@@ -408,23 +472,21 @@ class Game {
   }
 
   // ============================================================
-  //  WEBSOCKET + AUTO RECONNECT
+  //  WEBSOCKET
   // ============================================================
   connect(url) {
     try {
       this.ws = new WebSocket(url);
       this.ws.onopen = () => {
-        this.connected = true;
+        this.connected         = true;
         this.reconnectAttempts = 0;
         this.updateConnStatus(true);
-        document.getElementById('waitingText').innerHTML = '<div>⛳ Terhubung ke Server</div><div>Tunggu pemain atau klik Join Game</div>';
+        document.getElementById('waitingText').innerHTML =
+          '<div>⛳ Terhubung ke Server</div><div>Tunggu pemain atau klik Join Game</div>';
         document.getElementById('joinBtn').style.display = 'block';
       };
       this.ws.onmessage = (evt) => {
-        try {
-          const msg = JSON.parse(evt.data);
-          this.handleMessage(msg);
-        } catch(e) {}
+        try { this.handleMessage(JSON.parse(evt.data)); } catch(e) {}
       };
       this.ws.onclose = () => {
         this.connected = false;
@@ -435,13 +497,8 @@ class Game {
           setTimeout(() => this.connect(url), 2000);
         }
       };
-      this.ws.onerror = () => {
-        this.connected = false;
-        this.updateConnStatus(false);
-      };
-    } catch(e) {
-      alert('URL WebSocket tidak valid.');
-    }
+      this.ws.onerror = () => { this.connected=false; this.updateConnStatus(false); };
+    } catch(e) { alert('URL WebSocket tidak valid.'); }
   }
 
   send(msg) {
@@ -452,9 +509,9 @@ class Game {
 
   updateConnStatus(status) {
     const el = document.getElementById('connStatus');
-    if (status === true) { el.textContent = 'Online'; el.className = 'connected'; }
-    else if (status === 'reconnecting') { el.textContent = 'Reconnecting...'; el.className = 'reconnecting'; }
-    else { el.textContent = 'Offline'; el.className = 'disconnected'; }
+    if (status===true)             { el.textContent='Online';        el.className='connected'; }
+    else if (status==='reconnecting') { el.textContent='Reconnecting...'; el.className='reconnecting'; }
+    else                           { el.textContent='Offline';       el.className='disconnected'; }
   }
 
   // ============================================================
@@ -463,36 +520,39 @@ class Game {
   handleMessage(msg) {
     switch (msg.type) {
       case 'init':
-        this.myId = msg.yourId;
-        this.holeNumber = msg.holeNumber || 1;
+        this.myId          = msg.yourId;
+        this.holeNumber    = msg.holeNumber  || 1;
         this.currentTurnId = msg.currentTurn;
-        this.gameOver = msg.gameOver || false;
-        this.terrain = new Terrain(msg.seed);
+        this.gameOver      = msg.gameOver    || false;
+        this.terrain       = new Terrain(msg.seed);
         this.initHole();
-        this.players = (msg.players || []).map(p => new Player(p));
+        this.players       = (msg.players||[]).map(p => new Player(p));
         this.updatePlayersStartPos();
-        document.getElementById('waitingText').style.display = 'none';
+        document.getElementById('waitingText').style.display='none';
+        // Simpan posisi aman awal untuk semua pemain
+        this.players.forEach(p => p.saveSafePosition());
         this.updateHUD();
         break;
 
       case 'playerJoined':
         if (msg.player && msg.player.id !== this.myId) {
-          this.players.push(new Player(msg.player));
+          const np = new Player(msg.player);
+          this.players.push(np);
           this.updatePlayersStartPos();
+          np.saveSafePosition();
         }
         break;
 
       case 'state':
-        this.holeNumber = msg.holeNumber || this.holeNumber;
+        this.holeNumber    = msg.holeNumber  || this.holeNumber;
         this.currentTurnId = msg.currentTurn;
-        this.gameOver = msg.gameOver || false;
+        this.gameOver      = msg.gameOver    || false;
         if (msg.players) {
           for (const data of msg.players) {
-            const p = this.players.find(x => x.id === data.id);
+            const p = this.players.find(x => x.id===data.id);
             if (p) {
-              p.inHole = data.inHole;
+              p.inHole  = data.inHole;
               p.strokes = data.strokes;
-              // FIX: Hanya sync posisi jika bola benar-benar berhenti demi kelancaran multiplayer
               if (data.isStopped && p.isStopped) {
                 p.x = data.x;
                 if (this.terrain) p.y = this.terrain.getY(data.x) - p.radius;
@@ -505,15 +565,14 @@ class Game {
 
       case 'shoot':
         {
-          const p = this.players.find(x => x.id === msg.playerId);
+          const p = this.players.find(x => x.id===msg.playerId);
           if (p) {
             p.vx = msg.vx;
             p.vy = msg.vy;
             p.isStopped = false;
+            p.isOOB     = false;
             if (msg.strokes !== undefined) p.strokes = msg.strokes;
-            if (msg.playerId === this.myId) {
-              this.waitingForStop = true;
-            }
+            if (msg.playerId === this.myId) this.waitingForStop = true;
           }
         }
         break;
@@ -521,6 +580,12 @@ class Game {
       case 'turn':
         this.currentTurnId = msg.playerId;
         this.waitingForStop = false;
+        // ── KUNCI: Simpan posisi aman saat giliran dimulai ──
+        // Ini moment yang tepat: bola sudah berhenti, posisi valid
+        if (msg.playerId === this.myId) {
+          const me = this.players.find(p => p.id===this.myId);
+          if (me) me.saveSafePosition();
+        }
         this.updateHUD();
         break;
 
@@ -530,16 +595,15 @@ class Game {
         break;
 
       case 'reset':
-        this.gameOver = false;
-        this.holeNumber = msg.holeNumber || (this.holeNumber + 1);
+        this.gameOver      = false;
+        this.holeNumber    = msg.holeNumber  || (this.holeNumber+1);
         this.currentTurnId = msg.currentTurn;
-        this.waitingForStop = false;
-        this.terrain = new Terrain(msg.seed);
+        this.waitingForStop= false;
+        this.terrain       = new Terrain(msg.seed);
         this.initHole();
-        if (msg.players) {
-          this.players = msg.players.map(p => new Player(p));
-        }
+        if (msg.players) this.players = msg.players.map(p => new Player(p));
         this.updatePlayersStartPos();
+        this.players.forEach(p => p.saveSafePosition());
         document.getElementById('winNotify').classList.remove('show');
         this.updateHUD();
         break;
@@ -552,16 +616,14 @@ class Game {
 
   initHole() {
     if (!this.terrain) return;
-    const surfaceY = this.terrain.getY(W - 70);
-    this.hole = { x: W - 70, y: surfaceY + HOLE_R - 3 };
+    const surfaceY = this.terrain.getY(W-70);
+    this.hole = { x:W-70, y:surfaceY+HOLE_R-3 };
   }
 
   updatePlayersStartPos() {
     if (!this.terrain) return;
-    for (let i = 0; i < this.players.length; i++) {
-      const p = this.players[i];
-      const gy = this.terrain.getY(p.x);
-      p.y = gy - p.radius;
+    for (const p of this.players) {
+      p.y = this.terrain.getY(p.x) - p.radius;
     }
   }
 
@@ -578,68 +640,62 @@ class Game {
       this.connect(SERVER_URL);
       ipPanel.classList.remove('show');
     };
-    ipInput.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('connectBtn').click(); });
+    ipInput.addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('connectBtn').click(); });
 
-    const joinBtn = document.getElementById('joinBtn');
-    const joinPanel = document.getElementById('joinPanel');
-    const nameInput = document.getElementById('nameInput');
-    const confirmJoin = document.getElementById('confirmJoin');
+    const joinBtn    = document.getElementById('joinBtn');
+    const joinPanel  = document.getElementById('joinPanel');
+    const nameInput  = document.getElementById('nameInput');
+    const confirmJoin= document.getElementById('confirmJoin');
     const cancelJoin = document.getElementById('cancelJoin');
 
     joinBtn.onclick = () => {
-      if (this.localPlayerJoined) {
-        alert('Kamu sudah bergabung! Satu device hanya boleh 1 bola.');
-        return;
-      }
+      if (this.localPlayerJoined) { alert('Kamu sudah bergabung!'); return; }
       if (!this.connected) { alert('Belum terhubung ke server!'); return; }
       nameInput.value = '';
       joinPanel.classList.add('show');
       setTimeout(() => nameInput.focus(), 100);
     };
-
-    cancelJoin.onclick = () => joinPanel.classList.remove('show');
-
+    cancelJoin.onclick  = () => joinPanel.classList.remove('show');
     confirmJoin.onclick = () => {
       const name = nameInput.value.trim();
       if (!name) return;
-      this.send({ type: 'join', name: name });
+      this.send({ type:'join', name });
       joinPanel.classList.remove('show');
       this.localPlayerJoined = true;
       joinBtn.disabled = true;
       joinBtn.textContent = '✅ Sudah Join';
     };
-    nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') confirmJoin.click(); });
+    nameInput.addEventListener('keydown', e => { if(e.key==='Enter') confirmJoin.click(); });
 
-    const lbBtn = document.getElementById('leaderboardBtn');
-    const lbPanel = document.getElementById('lbPanel');
-    const closeLb = document.getElementById('closeLb');
-    lbBtn.onclick = () => { this.renderLeaderboard(); lbPanel.classList.add('show'); };
-    closeLb.onclick = () => lbPanel.classList.remove('show');
+    const lbBtn  = document.getElementById('leaderboardBtn');
+    const lbPanel= document.getElementById('lbPanel');
+    lbBtn.onclick           = () => { this.renderLeaderboard(); lbPanel.classList.add('show'); };
+    document.getElementById('closeLb').onclick = () => lbPanel.classList.remove('show');
   }
 
   // ============================================================
-  //  ANALOG JOYSTICK (Anti-Double Shoot)
+  //  ANALOG JOYSTICK
+  //  MODIFIKASI: saveSafePosition() dipanggil SEBELUM send shoot
   // ============================================================
   setupAnalog() {
     const container = document.getElementById('analogContainer');
-    const stick = document.getElementById('analogStick');
+    const stick     = document.getElementById('analogStick');
 
     const getPos = (e) => {
       const rect = container.getBoundingClientRect();
-      const cx = e.touches ? e.touches[0].clientX : e.clientX;
-      const cy = e.touches ? e.touches[0].clientY : e.clientY;
-      return { x: cx - rect.left, y: cy - rect.top };
+      const cx   = e.touches ? e.touches[0].clientX : e.clientX;
+      const cy   = e.touches ? e.touches[0].clientY : e.clientY;
+      return { x:cx-rect.left, y:cy-rect.top };
     };
 
     const onStart = (e) => {
       if (this.gameOver || !this.myId) return;
       if (this.currentTurnId !== this.myId) return;
-      const me = this.players.find(p => p.id === this.myId);
-      if (!me || (!me.isStopped && Math.abs(me.vx) > 0.1) || me.inHole || this.waitingForStop) return;
+      const me = this.players.find(p => p.id===this.myId);
+      if (!me || (!me.isStopped && Math.abs(me.vx)>0.1) || me.inHole || this.waitingForStop) return;
       this.analogDragging = true;
-      const pos = getPos(e);
-      this.analogCenter = { x: container.clientWidth/2, y: container.clientHeight/2 };
-      this.updateStick(pos);
+      this.analogCenter   = { x:container.clientWidth/2, y:container.clientHeight/2 };
+      this.updateStick(getPos(e));
       e.preventDefault();
     };
 
@@ -655,56 +711,53 @@ class Game {
       stick.style.transform = `translate(-50%,-50%)`;
 
       if (this.analogPower > 0.3) {
-        const me = this.players.find(p => p.id === this.myId);
-        if (me && (me.isStopped || Math.abs(me.vx) <= STOP_THRESH) && !this.waitingForStop) {
+        const me = this.players.find(p => p.id===this.myId);
+        if (me && (me.isStopped||Math.abs(me.vx)<=STOP_THRESH) && !this.waitingForStop) {
+          // ══════════════════════════════════════════════════
+          // MODIFIKASI KRITIS: Simpan posisi aman SEBELUM
+          // send shoot — ini adalah "posisi sebelum dipukul"
+          // yang akan jadi titik kembali jika bola OOB
+          // ══════════════════════════════════════════════════
+          me.saveSafePosition();
+
           this.send({
             type: 'shoot',
-            vx: this.analogDir.x * this.analogPower * MAX_POWER,
-            vy: this.analogDir.y * this.analogPower * MAX_POWER
+            vx:   this.analogDir.x * this.analogPower * MAX_POWER,
+            vy:   this.analogDir.y * this.analogPower * MAX_POWER,
           });
         }
       }
       this.analogPower = 0;
-      this.analogDir = { x:0, y:0 };
+      this.analogDir   = {x:0,y:0};
     };
 
-    container.addEventListener('mousedown', onStart);
-    container.addEventListener('touchstart', onStart, { passive:false });
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('touchmove', onMove, { passive:false });
-    window.addEventListener('mouseup', onEnd);
-    window.addEventListener('touchend', onEnd);
+    container.addEventListener('mousedown',  onStart);
+    container.addEventListener('touchstart', onStart, {passive:false});
+    window.addEventListener('mousemove',  onMove);
+    window.addEventListener('touchmove',  onMove,  {passive:false});
+    window.addEventListener('mouseup',   onEnd);
+    window.addEventListener('touchend',  onEnd);
   }
 
   updateStick(pos) {
     const stick = document.getElementById('analogStick');
-    const maxR = ANALOG_MAX;
     let dx = pos.x - this.analogCenter.x;
     let dy = pos.y - this.analogCenter.y;
     const dist = Math.hypot(dx, dy);
-    if (dist > maxR) {
-      const ratio = maxR / dist;
-      dx *= ratio; dy *= ratio;
-    }
-    this.analogPower = Math.min(dist / maxR, 1);
-    if (dist > 0) {
-      this.analogDir = { x: dx/dist, y: dy/dist };
-    }
+    if (dist > ANALOG_MAX) { const r=ANALOG_MAX/dist; dx*=r; dy*=r; }
+    this.analogPower = Math.min(dist/ANALOG_MAX, 1);
+    if (dist > 0) this.analogDir = { x:dx/dist, y:dy/dist };
     stick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
   }
 
-  // FIX: Memperbaiki kesalahan variabel nama dari snake_case ke camelCase
   updateAnalogVisibility() {
     const container = document.getElementById('analogContainer');
     if (this.gameOver || !this.myId || !this.currentTurnId) {
-      container.classList.remove('show');
-      return;
+      container.classList.remove('show'); return;
     }
-    const me = this.players.find(p => p.id === this.myId);
+    const me = this.players.find(p => p.id===this.myId);
     if (!me) { container.classList.remove('show'); return; }
-
-    // Ditambahkan toleransi kecepatan vx dekat 0 agar analog lebih responsif keluar
-    if (this.currentTurnId === this.myId && (me.isStopped || Math.abs(me.vx) < 0.1) && !me.inHole && !this.waitingForStop) {
+    if (this.currentTurnId===this.myId && (me.isStopped||Math.abs(me.vx)<0.1) && !me.inHole && !this.waitingForStop) {
       container.classList.add('show');
     } else {
       container.classList.remove('show');
@@ -712,36 +765,84 @@ class Game {
   }
 
   // ============================================================
+  //  OOB HANDLER
+  //  Dipanggil dari loop() saat Player.update() return false
+  // ============================================================
+  /**
+   * Tampilkan banner OOB selama durationMs milidetik.
+   */
+  showOOBNotify(durationMs = 2000) {
+    const el = document.getElementById('oobNotify');
+    el.classList.add('show');
+    clearTimeout(this._oobTimer);
+    this._oobTimer = setTimeout(() => el.classList.remove('show'), durationMs);
+  }
+
+  /**
+   * Handle Out of Bounds untuk pemain lokal:
+   * 1. Reset posisi ke lastSafe
+   * 2. Sync ke server
+   * 3. Kirim turnEnd (giliran otomatis bergantian)
+   * 4. Tampilkan notifikasi
+   *
+   * Penalti +1 stroke ditangani SERVER saat menerima 'oob'
+   * — ini memastikan konsistensi di semua client.
+   */
+  handleLocalOOB(me) {
+    if (!me || me.isOOB) return;   // cegah double-trigger
+
+    // Reset bola ke posisi aman
+    me.resetToSafe(this.terrain);
+
+    // Beritahu server: OOB event (server tambah +1 stroke + pindah giliran)
+    this.send({
+      type: 'oob',
+      playerId: this.myId,
+      x: me.lastSafeX,
+      y: me.lastSafeY,
+    });
+
+    // Sync posisi bola ke server agar semua client tahu bola sudah berhenti
+    this.send({
+      type: 'sync',
+      x:  me.x,
+      y:  me.y,
+      vx: 0,
+      vy: 0,
+      isStopped: true,
+    });
+
+    // Pindahkan giliran
+    this.send({ type: 'turnEnd' });
+    this.waitingForStop = false;
+
+    // Tampilkan notifikasi
+    this.showOOBNotify();
+  }
+
+  // ============================================================
   //  TURN & HOLE LOGIC
   // ============================================================
   checkLocalTurnEnd() {
     if (!this.myId || !this.waitingForStop || this.gameOver) return;
-    const me = this.players.find(p => p.id === this.myId);
+    const me = this.players.find(p => p.id===this.myId);
     if (!me || !me.isStopped || me.inHole) return;
-    
-    this.send({ 
-      type: 'sync', 
-      x: me.x, 
-      y: me.y, 
-      vx: 0, 
-      vy: 0, 
-      isStopped: true 
-    });
-    
-    this.send({ type: 'turnEnd' });
+
+    this.send({ type:'sync', x:me.x, y:me.y, vx:0, vy:0, isStopped:true });
+    this.send({ type:'turnEnd' });
     this.waitingForStop = false;
   }
 
   checkLocalHole() {
     if (!this.myId || this.gameOver) return;
-    const me = this.players.find(p => p.id === this.myId);
+    const me = this.players.find(p => p.id===this.myId);
     if (!me || me.inHole) return;
     const dx = me.x - this.hole.x;
     const dy = me.y - (this.hole.y - HOLE_R + 3);
-    if (Math.hypot(dx, dy) < HOLE_R * 0.7 && Math.hypot(me.vx, me.vy) < 7) {
+    if (Math.hypot(dx,dy) < HOLE_R*0.7 && Math.hypot(me.vx,me.vy) < 7) {
       me.inHole = true;
       me.vx = 0; me.vy = 0;
-      this.send({ type: 'hole', playerId: this.myId });
+      this.send({ type:'hole', playerId:this.myId });
     }
   }
 
@@ -751,138 +852,166 @@ class Game {
   updateHUD() {
     const turnName = document.getElementById('turnName');
     const holeInfo = document.getElementById('holeInfo');
-    if (!this.currentTurnId || this.players.length === 0) {
-      turnName.textContent = 'Menunggu pemain...';
-      holeInfo.textContent = `Hole ${this.holeNumber}`;
+    if (!this.currentTurnId || this.players.length===0) {
+      turnName.textContent='Menunggu pemain...';
+      holeInfo.textContent=`Hole ${this.holeNumber}`;
       return;
     }
-    const current = this.players.find(p => p.id === this.currentTurnId);
+    const current = this.players.find(p => p.id===this.currentTurnId);
     if (current) {
       turnName.textContent = `${current.name} (${current.strokes} pukulan)`;
       turnName.style.color = current.color;
-    } else {
-      turnName.textContent = '-';
-    }
-    holeInfo.textContent = `Hole ${this.holeNumber}  ·  ${this.players.length} Pemain`;
+    } else { turnName.textContent='-'; }
+    holeInfo.textContent=`Hole ${this.holeNumber}  ·  ${this.players.length} Pemain`;
   }
 
   showWin(name) {
-    const el = document.getElementById('winNotify');
-    document.getElementById('winNotifyText').textContent = `🏆 ${name} Menang!`;
-    el.classList.add('show');
+    document.getElementById('winNotifyText').textContent=`🏆 ${name} Menang!`;
+    document.getElementById('winNotify').classList.add('show');
   }
 
   renderLeaderboard() {
     const container = document.getElementById('lbContent');
-    if (this.leaderboardData.length === 0) {
-      container.innerHTML = '<div style="text-align:center;color:#888;padding:20px;">Belum ada data</div>';
+    if (!this.leaderboardData.length) {
+      container.innerHTML='<div style="text-align:center;color:#888;padding:20px;">Belum ada data</div>';
       return;
     }
-    let html = '<table><tr><th>#</th><th>Nama</th><th>Menang</th><th>Total Pukulan</th></tr>';
-    this.leaderboardData.forEach((p, i) => {
-      html += `<tr>
+    let html='<table><tr><th>#</th><th>Nama</th><th>Menang</th><th>Total Pukulan</th></tr>';
+    this.leaderboardData.forEach((p,i) => {
+      html+=`<tr>
         <td>${i+1}</td>
         <td style="color:${p.color};font-weight:600;">${p.name}</td>
         <td>${p.wins}</td>
         <td>${p.totalStrokes}</td>
       </tr>`;
     });
-    html += '</table>';
-    container.innerHTML = html;
+    html+='</table>';
+    container.innerHTML=html;
   }
 
   // ============================================================
   //  RENDERER
   // ============================================================
   draw() {
-    ctx.fillStyle = '#1a1a1a';
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle='#1a1a1a';
+    ctx.fillRect(0,0,W,H);
 
     if (!this.terrain) {
-      ctx.fillStyle = '#fff';
-      ctx.font = '16px sans-serif';
-      ctx.textAlign = 'center';
+      ctx.fillStyle='#fff'; ctx.font='16px sans-serif'; ctx.textAlign='center';
       ctx.fillText('Menyambungkan ke server...', W/2, H/2);
       return;
     }
 
-    ctx.fillStyle = '#ffffff';
-    for (let i = 0; i < 50; i++) {
-      const sx = ((i * 7919) % W);
-      const sy = ((i * 104729) % (H * 0.55));
-      ctx.globalAlpha = 0.08 + ((i * 7) % 5) * 0.03;
-      ctx.beginPath(); ctx.arc(sx, sy, (i%3===0?1.6:1), 0, Math.PI*2); ctx.fill();
+    // Bintang
+    ctx.fillStyle='#fff';
+    for (let i=0;i<50;i++) {
+      const sx=((i*7919)%W), sy=((i*104729)%(H*0.55));
+      ctx.globalAlpha=0.08+((i*7)%5)*0.03;
+      ctx.beginPath(); ctx.arc(sx,sy,(i%3===0?1.6:1),0,Math.PI*2); ctx.fill();
     }
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha=1;
 
-    ctx.fillStyle = 'rgba(255,255,255,0.04)';
+    // Awan
+    ctx.fillStyle='rgba(255,255,255,0.04)';
     for (let c of this.terrain.clouds) {
-      c.x += c.speed;
-      if (c.x > W + c.w) c.x = -c.w;
-      ctx.beginPath();
-      ctx.ellipse(c.x, c.y, c.w/2, c.h/2, 0, 0, Math.PI*2);
-      ctx.fill();
+      c.x+=c.speed; if(c.x>W+c.w) c.x=-c.w;
+      ctx.beginPath(); ctx.ellipse(c.x,c.y,c.w/2,c.h/2,0,0,Math.PI*2); ctx.fill();
     }
 
+    // Tanah
     ctx.beginPath();
-    ctx.moveTo(0, H);
-    for (let p of this.terrain.points) ctx.lineTo(p.x, p.y);
-    ctx.lineTo(W, H);
-    ctx.closePath();
-    ctx.fillStyle = '#2e7d32'; ctx.fill();
-    ctx.strokeStyle = '#1b5e20'; ctx.lineWidth = 3; ctx.stroke();
+    ctx.moveTo(0,H);
+    for (let p of this.terrain.points) ctx.lineTo(p.x,p.y);
+    ctx.lineTo(W,H); ctx.closePath();
+    ctx.fillStyle='#2e7d32'; ctx.fill();
+    ctx.strokeStyle='#1b5e20'; ctx.lineWidth=3; ctx.stroke();
 
-    ctx.strokeStyle = '#4caf50'; ctx.lineWidth = 4;
+    // Garis hijau permukaan
+    ctx.strokeStyle='#4caf50'; ctx.lineWidth=4;
     ctx.beginPath();
-    for (let p of this.terrain.points) ctx.lineTo(p.x, p.y);
+    for (let p of this.terrain.points) ctx.lineTo(p.x,p.y);
     ctx.stroke();
 
+    // ── Indikator OOB border kiri & kanan ─────────────────
+    // Garis merah tipis sebagai petunjuk visual area berbahaya
+    ctx.save();
+    ctx.strokeStyle='rgba(198,40,40,0.35)';
+    ctx.lineWidth=2;
+    ctx.setLineDash([6,5]);
+    ctx.beginPath(); ctx.moveTo(OOB_MARGIN,0); ctx.lineTo(OOB_MARGIN,H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(W-OOB_MARGIN,0); ctx.lineTo(W-OOB_MARGIN,H); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // Lubang hole
     ctx.beginPath();
-    ctx.ellipse(this.hole.x, this.hole.y, HOLE_R, HOLE_R*0.65, 0, 0, Math.PI*2);
-    ctx.fillStyle = '#0a0a0a'; ctx.fill();
-    ctx.strokeStyle = '#1b5e20'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.ellipse(this.hole.x,this.hole.y,HOLE_R,HOLE_R*0.65,0,0,Math.PI*2);
+    ctx.fillStyle='#0a0a0a'; ctx.fill();
+    ctx.strokeStyle='#1b5e20'; ctx.lineWidth=2; ctx.stroke();
 
-    ctx.strokeStyle = '#bdbdbd'; ctx.lineWidth = 2.5;
-    ctx.beginPath(); ctx.moveTo(this.hole.x, this.hole.y - HOLE_R*0.5); ctx.lineTo(this.hole.x, this.hole.y - 35); ctx.stroke();
-    ctx.fillStyle = '#ff5252';
-    ctx.beginPath(); ctx.moveTo(this.hole.x, this.hole.y - 35); ctx.lineTo(this.hole.x + 20, this.hole.y - 27); ctx.lineTo(this.hole.x, this.hole.y - 19); ctx.fill();
+    // Tiang & bendera
+    ctx.strokeStyle='#bdbdbd'; ctx.lineWidth=2.5;
+    ctx.beginPath(); ctx.moveTo(this.hole.x,this.hole.y-HOLE_R*0.5); ctx.lineTo(this.hole.x,this.hole.y-35); ctx.stroke();
+    ctx.fillStyle='#ff5252';
+    ctx.beginPath();
+    ctx.moveTo(this.hole.x,this.hole.y-35);
+    ctx.lineTo(this.hole.x+20,this.hole.y-27);
+    ctx.lineTo(this.hole.x,this.hole.y-19);
+    ctx.fill();
 
+    // Pemain
     this.players.forEach(p => p.draw(ctx));
 
+    // Highlight giliran
     if (!this.gameOver && this.currentTurnId) {
-      const active = this.players.find(p => p.id === this.currentTurnId);
+      const active=this.players.find(p=>p.id===this.currentTurnId);
       if (active && active.isStopped && !active.inHole) {
         ctx.beginPath();
-        ctx.arc(active.x, active.y, active.radius + 7, 0, Math.PI*2);
-        ctx.strokeStyle = 'rgba(255,215,0,0.5)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([5, 5]);
-        ctx.stroke();
-        ctx.setLineDash([]);
+        ctx.arc(active.x,active.y,active.radius+7,0,Math.PI*2);
+        ctx.strokeStyle='rgba(255,215,0,0.5)';
+        ctx.lineWidth=2; ctx.setLineDash([5,5]); ctx.stroke(); ctx.setLineDash([]);
       }
     }
 
-    if (this.analogDragging && this.analogPower > 0.1 && this.myId) {
-      const me = this.players.find(p => p.id === this.myId);
+    // Garis arah tembak
+    if (this.analogDragging && this.analogPower>0.1 && this.myId) {
+      const me=this.players.find(p=>p.id===this.myId);
       if (me) {
         ctx.save();
-        ctx.setLineDash([10, 7]);
-        ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-        ctx.lineWidth = 2.5;
+        ctx.setLineDash([10,7]);
+        ctx.strokeStyle='rgba(255,255,255,0.8)';
+        ctx.lineWidth=2.5;
         ctx.beginPath();
-        ctx.moveTo(me.x, me.y);
-        ctx.lineTo(me.x + this.analogDir.x * this.analogPower * 12 * MAX_POWER,
-                   me.y + this.analogDir.y * this.analogPower * 12 * MAX_POWER);
+        ctx.moveTo(me.x,me.y);
+        ctx.lineTo(me.x+this.analogDir.x*this.analogPower*12*MAX_POWER,
+                   me.y+this.analogDir.y*this.analogPower*12*MAX_POWER);
         ctx.stroke();
         ctx.restore();
       }
     }
   }
 
+  // ============================================================
+  //  MAIN LOOP
+  //  MODIFIKASI: Deteksi OOB dari return value Player.update()
+  // ============================================================
   loop() {
-    if (this.terrain && this.players.length > 0 && !this.gameOver) {
-      for (let p of this.players) {
-        p.update(this.terrain);
+    if (this.terrain && this.players.length>0 && !this.gameOver) {
+      for (const p of this.players) {
+        // update() return false = bola keluar batas
+        const inBounds = p.update(this.terrain);
+
+        if (!inBounds && !p.isOOB) {
+          // ── Hanya proses OOB untuk pemain lokal ───────────
+          // Pemain lain: cukup reset visual, penalti diurus server
+          if (p.id === this.myId) {
+            this.handleLocalOOB(p);
+          } else {
+            // Remote player: reset ke posisi aman untuk visual
+            // (server akan broadcast state yang benar)
+            p.resetToSafe(this.terrain);
+          }
+        }
       }
       this.checkLocalHole();
       this.checkLocalTurnEnd();
