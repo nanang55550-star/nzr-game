@@ -9,6 +9,10 @@ git clone https://github.com/nanang55550-star/nzr-game.git
 ```bash
 cd nzr-game
 ```
+kalau main game multiplayer harus install ini
+```bash
+pip install websockets
+```
 ❗ catatan: kalau mau update Repository github karena ada game baru gunakan perintah ini ❗
 ```bash
 git pull origin main
