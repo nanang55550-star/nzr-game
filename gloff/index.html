@@ -101,7 +101,7 @@
   #analogContainer {
     position:absolute; left:24px; bottom:24px; z-index:15;
     width:110px; height:110px;
-    touch-action:none; pointer-events:auto;
+    touch-action:none;
     opacity:0; pointer-events:none;
     transition:opacity 0.25s ease;
   }
@@ -183,7 +183,6 @@
     <div id="winNotifySub">Map baru akan dimuat...</div>
   </div>
 
-  <!-- IP Config Panel -->
   <div id="ipPanel" class="panelOverlay show">
     <div class="panelBox">
       <div class="panelTitle">🔗 Sambungkan ke Server</div>
@@ -194,7 +193,6 @@
     </div>
   </div>
 
-  <!-- Join Panel -->
   <div id="joinPanel" class="panelOverlay">
     <div class="panelBox">
       <div class="panelTitle">Join Game</div>
@@ -205,7 +203,6 @@
     </div>
   </div>
 
-  <!-- Leaderboard Panel -->
   <div id="lbPanel" class="panelOverlay">
     <div class="panelBox" style="width:360px;">
       <div class="panelTitle">🏆 Leaderboard</div>
@@ -432,7 +429,6 @@ class Game {
       this.ws.onclose = () => {
         this.connected = false;
         this.updateConnStatus(false);
-        // Auto reconnect jika sudah pernah join
         if (this.localPlayerJoined && this.reconnectAttempts < 5) {
           this.reconnectAttempts++;
           this.updateConnStatus('reconnecting');
@@ -494,10 +490,9 @@ class Game {
           for (const data of msg.players) {
             const p = this.players.find(x => x.id === data.id);
             if (p) {
-              // Hanya sync non-posisi untuk menjaga deterministik
               p.inHole = data.inHole;
               p.strokes = data.strokes;
-              // Koreksi posisi hanya jika bola DIAM di kedua sisi (menghindari rubber-banding)
+              // FIX: Hanya sync posisi jika bola benar-benar berhenti demi kelancaran multiplayer
               if (data.isStopped && p.isStopped) {
                 p.x = data.x;
                 if (this.terrain) p.y = this.terrain.getY(data.x) - p.radius;
@@ -640,8 +635,7 @@ class Game {
       if (this.gameOver || !this.myId) return;
       if (this.currentTurnId !== this.myId) return;
       const me = this.players.find(p => p.id === this.myId);
-      // VALIDASI KETAT: hanya bisa shoot jika benar-benar berhenti dan tidak sedang menunggu
-      if (!me || !me.isStopped || me.inHole || this.waitingForStop) return;
+      if (!me || (!me.isStopped && Math.abs(me.vx) > 0.1) || me.inHole || this.waitingForStop) return;
       this.analogDragging = true;
       const pos = getPos(e);
       this.analogCenter = { x: container.clientWidth/2, y: container.clientHeight/2 };
@@ -662,8 +656,7 @@ class Game {
 
       if (this.analogPower > 0.3) {
         const me = this.players.find(p => p.id === this.myId);
-        // Double-check sebelum kirim ke server
-        if (me && me.isStopped && !this.waitingForStop) {
+        if (me && (me.isStopped || Math.abs(me.vx) <= STOP_THRESH) && !this.waitingForStop) {
           this.send({
             type: 'shoot',
             vx: this.analogDir.x * this.analogPower * MAX_POWER,
@@ -700,6 +693,7 @@ class Game {
     stick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
   }
 
+  // FIX: Memperbaiki kesalahan variabel nama dari snake_case ke camelCase
   updateAnalogVisibility() {
     const container = document.getElementById('analogContainer');
     if (this.gameOver || !this.myId || !this.currentTurnId) {
@@ -709,7 +703,8 @@ class Game {
     const me = this.players.find(p => p.id === this.myId);
     if (!me) { container.classList.remove('show'); return; }
 
-    if (this.currentTurnId === this.myId && me.isStopped && !me.inHole && !this.waitingForStop) {
+    // Ditambahkan toleransi kecepatan vx dekat 0 agar analog lebih responsif keluar
+    if (this.currentTurnId === this.myId && (me.isStopped || Math.abs(me.vx) < 0.1) && !me.inHole && !this.waitingForStop) {
       container.classList.add('show');
     } else {
       container.classList.remove('show');
